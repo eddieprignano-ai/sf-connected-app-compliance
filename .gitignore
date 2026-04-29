@@ -32,3 +32,9 @@ scratch/
 # Env files (in case anyone adds .env loading later)
 .env
 .env.local
+
+# Maintainer-only context (project memory, never published)
+CLAUDE.md
+.claude/
+.cursorrules
+.cursor/
