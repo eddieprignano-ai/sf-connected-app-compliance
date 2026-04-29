@@ -1,0 +1,46 @@
+{
+  "name": "sf-connected-app-compliance",
+  "version": "0.1.0",
+  "description": "Read-only audit of every Connected App and External Client App in a Salesforce org. Tells you which will fail to authenticate when Salesforce hardens PKCE, refresh-token rotation, and refresh-token validity — and whose publisher owns each fix.",
+  "type": "module",
+  "main": "connected-app-compliance.mjs",
+  "bin": {
+    "sf-connected-app-compliance": "./connected-app-compliance.mjs"
+  },
+  "scripts": {
+    "scan": "node connected-app-compliance.mjs",
+    "scan:will-break": "node connected-app-compliance.mjs --check-metadata --will-break",
+    "help": "node connected-app-compliance.mjs --help"
+  },
+  "keywords": [
+    "salesforce",
+    "connected-app",
+    "external-client-app",
+    "pkce",
+    "oauth",
+    "compliance",
+    "audit",
+    "release-update",
+    "appexchange",
+    "security"
+  ],
+  "author": "Eddie Prignano",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eddieprignano-ai/sf-connected-app-compliance.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eddieprignano-ai/sf-connected-app-compliance/issues"
+  },
+  "homepage": "https://github.com/eddieprignano-ai/sf-connected-app-compliance#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "connected-app-compliance.mjs",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ]
+}
