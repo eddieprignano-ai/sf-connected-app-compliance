@@ -5,7 +5,9 @@
 > PKCE, refresh-token rotation, and refresh-token validity — **and whose
 > publisher owns each fix**.
 
+[![npm version](https://img.shields.io/npm/v/sf-connected-app-compliance.svg)](https://www.npmjs.com/package/sf-connected-app-compliance)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node](https://img.shields.io/node/v/sf-connected-app-compliance.svg)](https://nodejs.org)
 
 ## Why this exists
 
@@ -116,13 +118,30 @@ are best-practice posture.
 
 ## Install
 
+**Option 1 — npx (no install, recommended for one-off scans):**
+
+```bash
+npx sf-connected-app-compliance --org myorg --check-metadata --will-break
+```
+
+`npx` will fetch the package the first time and cache it. No global install required.
+
+**Option 2 — global npm install (for repeated runs):**
+
+```bash
+npm install -g sf-connected-app-compliance
+sf-connected-app-compliance --org myorg --check-metadata --will-break
+```
+
+**Option 3 — clone (for contributors):**
+
 ```bash
 git clone https://github.com/eddieprignano-ai/sf-connected-app-compliance.git
 cd sf-connected-app-compliance
-npm install   # no runtime dependencies; this is a no-op for now
+node connected-app-compliance.mjs --org myorg
 ```
 
-Or run it directly without cloning:
+**Option 4 — single-file download (no Node package manager):**
 
 ```bash
 curl -O https://raw.githubusercontent.com/eddieprignano-ai/sf-connected-app-compliance/main/connected-app-compliance.mjs
