@@ -193,28 +193,57 @@ function detectFlows(meta) {
   };
 }
 
-function retrieveCAMetadata(devNames) {
-  if (!devNames.length) return new Map();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-meta-'));
-  console.error(`${DIM}retrieving ConnectedApp metadata for ${devNames.length} apps to ${tmp}...${NC}`);
+// Strip Salesforce CLI advisory lines (warnings about CLI updates, etc.) from
+// captured stderr so user-facing errors are readable. Without this, CLI update
+// notices leak into our error messages and obscure the real problem.
+function cleanCliStderr(s) {
+  return (s || '')
+    .toString()
+    .split('\n')
+    .filter((l) => l.trim() && !/›\s+Warning:/.test(l) && !/^\s*Warning:\s*@?salesforce\/cli/i.test(l))
+    .join('\n')
+    .trim();
+}
 
-  // Chunk by 100 to keep command line under limits
+// `sf project retrieve start` requires a workspace with an sfdx-project.json
+// at the cwd. To make this tool runnable from anywhere (not just inside an
+// SFDX project), we create a minimal scratch project in a temp dir and run
+// retrieves with `cwd` set to it. Without this, retrieves fail silently with
+// InvalidProjectWorkspaceError and the user gets an incomplete report without
+// realizing it.
+function ensureScratchSfdxProject() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sf-cac-project-'));
+  fs.writeFileSync(path.join(dir, 'sfdx-project.json'), JSON.stringify({
+    packageDirectories: [{ path: 'force-app', default: true }],
+    namespace: '',
+    sfdcLoginUrl: 'https://login.salesforce.com',
+    sourceApiVersion: '60.0',
+  }, null, 2));
+  fs.mkdirSync(path.join(dir, 'force-app', 'main', 'default'), { recursive: true });
+  return dir;
+}
+
+function retrieveCAMetadata(devNames) {
+  if (!devNames.length) return { map: new Map(), errors: [] };
+  const projectDir = ensureScratchSfdxProject();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-meta-'));
+  console.error(`${DIM}retrieving ConnectedApp metadata for ${devNames.length} apps...${NC}`);
+
   const chunks = [];
   for (let i = 0; i < devNames.length; i += 100) chunks.push(devNames.slice(i, i + 100));
 
-  const out = new Map();
+  const errors = [];
   for (const chunk of chunks) {
     const cmd = `sf project retrieve start ${chunk.map((n) => `--metadata "ConnectedApp:${n}"`).join(' ')} --target-org ${ORG} --output-dir "${tmp}" --json`;
     try {
-      execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 128 * 1024 * 1024 });
+      execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 128 * 1024 * 1024, cwd: projectDir });
     } catch (e) {
-      // Some retrievals may partial-fail (managed, deleted); continue
-      if (!JSON_OUT) console.error(`${YELLOW}metadata retrieval partial:${NC} ${(e.stderr?.toString() || e.message).slice(0, 200)}`);
+      const msg = cleanCliStderr(e.stderr) || e.message;
+      errors.push(msg.slice(0, 400));
     }
   }
 
-  // Walk the output dir for .connectedApp-meta.xml files (path varies between
-  // sfdx-project-rooted retrieve and standalone). We accept any depth.
+  const out = new Map();
   function walk(dir) {
     if (!fs.existsSync(dir)) return;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -228,8 +257,13 @@ function retrieveCAMetadata(devNames) {
   }
   walk(tmp);
 
-  // Best-effort: leave the temp dir for forensics if the user wants to inspect
-  return out;
+  // Surface partial-failure visibly: if we asked for N and got back M < N,
+  // the user needs to know their report is incomplete.
+  if (out.size < devNames.length) {
+    console.error(`${YELLOW}warning:${NC} retrieved metadata for ${out.size}/${devNames.length} apps. Apps without retrieved metadata will have PKCE/rotation/policy rules SKIPPED.`);
+    if (errors.length) console.error(`${DIM}  first error: ${errors[0].split('\n')[0].slice(0, 200)}${NC}`);
+  }
+  return { map: out, errors };
 }
 
 function retrieveOrgWidePkceSetting() {
@@ -240,11 +274,12 @@ function retrieveOrgWidePkceSetting() {
   //   <blockOAuthUsrAgtFlow>    — block user-agent (implicit) flow
   //   <oAuthCdCrdtFlowEnable>   — allow code-credential flow
   // We pull all four because they all change "what will break" downstream.
+  const projectDir = ensureScratchSfdxProject();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oidc-settings-'));
   try {
-    execSync(`sf project retrieve start --metadata "Settings:OauthOidc" --target-org ${ORG} --output-dir "${tmp}" --json`, { stdio: ['ignore', 'pipe', 'pipe'] });
+    execSync(`sf project retrieve start --metadata "Settings:OauthOidc" --target-org ${ORG} --output-dir "${tmp}" --json`, { stdio: ['ignore', 'pipe', 'pipe'], cwd: projectDir });
   } catch (e) {
-    return { error: (e.stderr?.toString() || e.message).slice(0, 200) };
+    return { error: cleanCliStderr(e.stderr) || e.message.slice(0, 200) };
   }
   const settingsPath = walkFor(tmp, 'OauthOidc.settings-meta.xml');
   if (!settingsPath) return { error: 'Settings:OauthOidc not retrieved (older org? insufficient permission?)' };
@@ -605,7 +640,8 @@ if (CHECK_METADATA) {
 // ── Metadata retrieval (legacy CAs) ─────────────────────────────────────
 let metaByDev = new Map();
 if (CHECK_METADATA && legacyApps.length) {
-  metaByDev = retrieveCAMetadata(legacyApps.map((a) => a._devName));
+  const result = retrieveCAMetadata(legacyApps.map((a) => a._devName));
+  metaByDev = result.map;
 }
 
 // ── Evaluate ─────────────────────────────────────────────────────────────

@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-04-29
+
+### Fixed
+
+- **`--check-metadata` no longer silently fails when run outside an SFDX
+  project.** Previously, `sf project retrieve start` requires a workspace with
+  an `sfdx-project.json` at the cwd; if the user ran the tool from any other
+  directory (the default for most installs), the retrieve threw
+  `InvalidProjectWorkspaceError` and the tool returned an incomplete
+  `WILL_BREAK` list without flagging that anything had gone wrong. The tool
+  now generates a scratch SFDX project in a temp dir and runs retrieves with
+  `cwd` set to it.
+- **Org-wide `Settings:OauthOidc` retrieval** had the same silent-failure mode
+  and is fixed the same way.
+- **Partial-retrieval visibility.** When metadata can't be retrieved for some
+  apps (managed-package CAs, deleted apps, permission gaps), the tool now
+  prints a `warning: retrieved metadata for N/M apps` message instead of
+  silently skipping rules.
+- **Salesforce CLI advisory leakage.** Stripped `›  Warning: @salesforce/cli
+  update available` lines from user-facing error messages.
+
+### Added
+
+- README now links to the canonical Salesforce documentation for every rule
+  and Setup page the tool reads, plus the original AppExchange partner
+  mandate announcement.
+
 ## [0.1.0] - 2026-04-29
 
 Initial public release.

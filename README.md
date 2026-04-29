@@ -11,22 +11,46 @@
 
 Salesforce is rolling out mandatory hardening across the OAuth surface:
 
-- **PKCE enforcement** for the authorization-code flow (Release Update,
-  org-wide toggle in *Setup → OAuth and OpenID Connect Settings*).
-- **Refresh Token Rotation** as a per-app requirement.
-- **Refresh-token validity policy** — tokens with no expiry will be force-revoked.
-- **AppExchange partner mandate (May 11, 2026)** — partner-owned Connected
-  Apps that don't ship PKCE + refresh-token rotation by that date can be
-  delisted or have their Salesforce interop suspended. *Their* failure becomes
-  *your* outage.
+- **PKCE enforcement** for the authorization-code flow ([docs][pkce-doc]). Org-wide toggle in *Setup → OAuth and OpenID Connect Settings*; per-app toggle on each Connected App.
+- **Refresh Token Rotation** as a per-app requirement ([docs][rotation-doc]).
+- **Refresh-token validity policy** — tokens with no expiry will be force-revoked. Configure under *Setup → Manage Connected Apps → [app] → OAuth Policies*.
+- **AppExchange partner mandate (May 11, 2026)** — partner-owned Connected Apps that don't ship PKCE + refresh-token rotation by that date can be delisted or have their Salesforce interop suspended ([Salesforce ISV Partner Community announcement][partner-mandate]). *Their* failure becomes *your* outage.
 
-The tooling Salesforce ships out-of-the-box is a series of Setup pages
-(*Manage Connected Apps*, *Connected Apps OAuth Usage*, *External Client Apps
-Manager*, *Installed Packages*). Each is correct in isolation. None of them
-together tell you *"which of my 100+ apps will actually break, who owns the
-fix, and how active is each one."*
+The tooling Salesforce ships out-of-the-box is a series of Setup pages — each correct in isolation, but none of them together tell you *"which of my 100+ apps will actually break, who owns the fix, and how active is each one."*
 
-This tool does that, in one read-only run.
+[pkce-doc]: https://help.salesforce.com/s/articleView?id=xcloud.remoteaccess_oauth_pkce.htm&type=5
+[rotation-doc]: https://help.salesforce.com/s/articleView?id=xcloud.remoteaccess_rotate_refresh_tokens.htm&type=5
+[partner-mandate]: https://partners.salesforce.com/pdx/s/pcnews/mandatory-security-updates-for-connected-apps-and-ecas-MCFBLDLDQ2TVDZFA22GLAMBVEZGY?language=en_US
+
+### Salesforce's own audit pages
+
+The tool covers the same ground as these Setup pages, plus joins them together:
+
+| Salesforce Setup page | What this tool reads | Link |
+|---|---|---|
+| Manage Connected Apps | `ConnectedApplication` (Tooling API) | [docs][setup-manage-cas] |
+| External Client Apps Manager | `ExternalClientApplication` + `ExtlClntAppOauthPlcyCnfg` | [docs][setup-eca] |
+| Connected Apps OAuth Usage | `OauthToken` (last 90d activity) | [docs][setup-oauth-usage] |
+| Installed Packages | `InstalledSubscriberPackage` (publisher attribution) | [docs][setup-installed-pkgs] |
+| OAuth and OpenID Connect Settings | `Settings:OauthOidc` metadata | [docs][setup-oauth-oidc] |
+
+[setup-manage-cas]: https://help.salesforce.com/s/articleView?id=xcloud.connected_app_manage.htm&type=5
+[setup-eca]: https://help.salesforce.com/s/articleView?id=xcloud.external_client_apps_manager.htm&type=5
+[setup-oauth-usage]: https://help.salesforce.com/s/articleView?id=xcloud.connected_app_manage_oauth_usage.htm&type=5
+[setup-installed-pkgs]: https://help.salesforce.com/s/articleView?id=sf.distribution_installing_packages.htm&type=5
+[setup-oauth-oidc]: https://help.salesforce.com/s/articleView?id=xcloud.remoteaccess_oauth_settings.htm&type=5
+
+### Further Salesforce reading
+
+- **All Release Updates** (the auto-enforcement queue) — [Setup help][release-updates]
+- **Connected App OAuth flows reference** — [docs][oauth-flows]
+- **External Client Apps overview** — [docs][eca-overview]
+- **Spring '26 Release Notes — Connected Apps & OAuth** — [release notes][rn-spring26]
+
+[release-updates]: https://help.salesforce.com/s/articleView?id=sf.release_updates.htm&type=5
+[oauth-flows]: https://help.salesforce.com/s/articleView?id=xcloud.remoteaccess_oauth_flows.htm&type=5
+[eca-overview]: https://help.salesforce.com/s/articleView?id=xcloud.external_client_apps_overview.htm&type=5
+[rn-spring26]: https://help.salesforce.com/s/articleView?id=release-notes.rn_security_connected_apps.htm&type=5
 
 ## What it produces
 
@@ -57,15 +81,15 @@ Each app gets:
 
 ## Compliance rules
 
-| Rule | What it checks | Source |
-|------|---|---|
-| `pkce_required` | App has `isPkceRequired=true` (or auth-code flow not in use, in which case skipped) | `<isPkceRequired>` in `.connectedApp-meta.xml` |
-| `refresh_token_rotation_enabled` | App has `isRefreshTokenRotationEnabled=true` (skipped if `refresh_token` not in scopes) | `<isRefreshTokenRotationEnabled>` in metadata |
-| `refresh_token_policy_explicit` | App has an explicit refresh-token policy (not `infinite`) | `<refreshTokenPolicy>` in metadata, or `RefreshTokenPolicyType` for ECAs |
-| `permitted_users_admin_approved` | App restricts to admin-approved users | `OptionsAllowAdminApprovedUsersOnly` (CA) / `PermittedUsersPolicyType` (ECA) |
-| `no_guest_code_credential_flow` | Guest code-credential flow disabled | `OptionsCodeCredentialGuestEnabled` / `IsGuestCodeCredFlowEnabled` |
-| `ip_relaxation_enforced` | IP relaxation not bypassed | `<ipRelaxation>` in metadata / `IpRelaxationPolicyType` |
-| `client_creds_user_set_when_enabled` | Client-credentials flow has a designated run-as user | `ClientCredentialsFlowUser` (ECA) |
+| Rule | What it checks | Source | Salesforce docs |
+|------|---|---|---|
+| `pkce_required` | App has `isPkceRequired=true` (or auth-code flow not in use, in which case skipped) | `<isPkceRequired>` in `.connectedApp-meta.xml` | [PKCE][pkce-doc] |
+| `refresh_token_rotation_enabled` | App has `isRefreshTokenRotationEnabled=true` (skipped if `refresh_token` not in scopes) | `<isRefreshTokenRotationEnabled>` in metadata | [Rotate Refresh Tokens][rotation-doc] |
+| `refresh_token_policy_explicit` | App has an explicit refresh-token policy (not `infinite`) | `<refreshTokenPolicy>` in metadata, or `RefreshTokenPolicyType` for ECAs | [Refresh Token Policies](https://help.salesforce.com/s/articleView?id=xcloud.remoteaccess_oauth_refresh_token_policies.htm&type=5) |
+| `permitted_users_admin_approved` | App restricts to admin-approved users | `OptionsAllowAdminApprovedUsersOnly` (CA) / `PermittedUsersPolicyType` (ECA) | [Manage Permitted Users](https://help.salesforce.com/s/articleView?id=xcloud.connected_app_manage_users.htm&type=5) |
+| `no_guest_code_credential_flow` | Guest code-credential flow disabled | `OptionsCodeCredentialGuestEnabled` / `IsGuestCodeCredFlowEnabled` | [OAuth Authorization Code & Credentials Flow](https://help.salesforce.com/s/articleView?id=xcloud.remoteaccess_oauth_code_credentials_flow.htm&type=5) |
+| `ip_relaxation_enforced` | IP relaxation not bypassed | `<ipRelaxation>` in metadata / `IpRelaxationPolicyType` | [Manage IP Restrictions](https://help.salesforce.com/s/articleView?id=xcloud.connected_app_manage_ip.htm&type=5) |
+| `client_creds_user_set_when_enabled` | Client-credentials flow has a designated run-as user | `ClientCredentialsFlowUser` (ECA) | [OAuth Client Credentials Flow](https://help.salesforce.com/s/articleView?id=xcloud.remoteaccess_oauth_client_credentials_flow.htm&type=5) |
 
 `pkce_required`, `refresh_token_rotation_enabled`, `refresh_token_policy_explicit`,
 and `client_creds_user_set_when_enabled` are **break-condition rules** — failure
