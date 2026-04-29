@@ -5,7 +5,7 @@
   "type": "module",
   "main": "connected-app-compliance.mjs",
   "bin": {
-    "sf-connected-app-compliance": "./connected-app-compliance.mjs"
+    "sf-connected-app-compliance": "connected-app-compliance.mjs"
   },
   "scripts": {
     "scan": "node connected-app-compliance.mjs",
@@ -28,7 +28,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/eddieprignano-ai/sf-connected-app-compliance.git"
+    "url": "git+https://github.com/eddieprignano-ai/sf-connected-app-compliance.git"
   },
   "bugs": {
     "url": "https://github.com/eddieprignano-ai/sf-connected-app-compliance/issues"
