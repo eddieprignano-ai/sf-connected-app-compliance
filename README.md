@@ -116,6 +116,7 @@ node connected-app-compliance.mjs --readiness --org myorg --json
 |---|---|---|---|
 | Phishing-Resistant MFA for Admins | Jul 1 2026 | Privileged users (MAD/VAD/CustomizeApp/AuthorApex) vs. registered U2F/passkey/built-in methods | `READY` / `GAP` |
 | MFA for All Internal Users | Jul 20 2026 | Active internal users with no registered verification method (`TwoFactorMethodsInfo`) | `READY` / `GAP` |
+| **SSO IdP MFA signal (AMR/ACR)** | gates M1/M2/M3 | Live `LoginHistory.AuthMethodReference` / `AuthContextClassRef` classified into Salesforce's 3-tier model | `READY` / `REVIEW` / `GAP` |
 | Bypass-MFA exemption holders | — | Assignments of `PermissionsBypassMFAForUiLogins` | `READY` / `REVIEW` |
 | Step-Up Auth on Report Actions | Jul 1 2026 | Report-permission users lacking a native verification method | `READY` / `GAP` |
 | Step-Up on Anomalous Exports | Jul 13 2026 | `ReportExport` EventLogFile footprint (ML control is unscoreable) | `INFORM` |

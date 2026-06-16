@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     against registered phishing-resistant methods (`TwoFactorMethodsInfo`
     HasU2F/HasSecurityKey/HasBuiltInAuthenticator).
   - **MFA for All Internal Users** (M2) + **Bypass-MFA exemption holders** (M2b).
+  - **SSO IdP MFA Signal** (M2c) — reads the live `AuthMethodReference` (AMR) and
+    `AuthContextClassRef` (ACR) from `LoginHistory` and classifies it against
+    Salesforce's three-tier strength model (phishing-resistant / strong / weak).
+    This is what actually decides whether SSO satisfies M2 (and never M1/M3).
+    A WEAK or absent signal means Salesforce will challenge every internal user
+    for native MFA at enforcement. Re-runnable as before/after proof of an IdP
+    (Okta AMR attribute / Entra deferral) cutover. `--idp-days N` sets the window.
   - **Step-Up Auth on Report Actions** (M3) — report-permission users lacking a
     native verification method.
   - **Step-Up on Anomalous Exports** (M4) — `ReportExport` EventLogFile footprint

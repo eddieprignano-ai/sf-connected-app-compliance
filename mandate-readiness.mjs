@@ -58,11 +58,33 @@ function safe(fn, fallback, jsonOut) {
 }
 const csvCell = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 
+// Salesforce three-tier MFA-strength model, applied to the AMR/ACR signal the
+// IdP sends in the SSO assertion. "contains" matching per the Jun 11 update.
+// Conservative: only mark a tier when a recognized token is present.
+const AMR_PR = ['hwk', 'fido', 'x509', 'passkey', 'webauthn', 'u2f', 'phr', 'phrh', 'swk'];
+const AMR_STRONG = ['mfa', 'otp', 'sms', 'tel', 'rsa', 'kba', 'mca', 'totp', 'sfa', 'push'];
+function classifyAmr(amr) {
+  if (!amr) return 'none';
+  const s = String(amr).toLowerCase();
+  if (AMR_PR.some((t) => s.includes(t))) return 'phishing-resistant';
+  if (AMR_STRONG.some((t) => s.includes(t))) return 'strong';
+  return 'weak';
+}
+function classifyAcr(acr) {
+  if (!acr) return 'none';
+  const s = String(acr).toLowerCase();
+  if (/x509|smartcard|fido|webauthn/.test(s)) return 'phishing-resistant';
+  if (/passwordprotectedtransport|unspecified|:password\b|kerberos|previous-session/.test(s)) return 'weak';
+  if (/mobiletwofactor|timesynctoken|otp|mfa|hardware|nomadtelephony|telephony/.test(s)) return 'strong';
+  return 'unclassified';
+}
+
 export async function runReadiness() {
   const ORG = val('--org', process.env.DEFAULT_SALESFORCE_ORG || '');
   const JSON_OUT = flag('--json');
   const EXPORT_CSV = flag('--export-csv');
   const EXPORT_DAYS = parseInt(val('--export-days', '30'), 10);
+  const IDP_DAYS = parseInt(val('--idp-days', '7'), 10);
   if (!ORG) { console.error('error: pass --org <alias> (or set DEFAULT_SALESFORCE_ORG)'); return 1; }
   if (flag('-h') || flag('--help')) {
     console.log(`Usage: mandate-readiness.mjs --org <alias> [--json] [--export-csv [file]] [--export-days N]
@@ -70,6 +92,7 @@ export async function runReadiness() {
   --org <alias>        Target org (default: $DEFAULT_SALESFORCE_ORG)
   --export-csv [file]  Write per-user remediation list (default: mandate-gaps-<org>-<date>.csv)
   --export-days N      ReportExport EventLogFile window (default 30)
+  --idp-days N         LoginHistory AMR/ACR signal window (default 7)
   --json               Machine-readable output`);
     return 0;
   }
@@ -113,6 +136,35 @@ export async function runReadiness() {
     detail: `${gapM2.length} of ${allStandard.size} active internal users have no Salesforce-registered method. SSO users MAY still pass via IdP AMR/ACR — verify the IdP signal (manual). Front-line/no-smartphone users are highest lockout risk.`,
     checklistQ: ['Q3', 'Q8'],
   });
+
+  /* ── SSO IdP MFA signal (AMR/ACR) — decides whether SSO satisfies M2/M1/M3 ── */
+  // Reads what the IdP actually sends on real logins. AMR is groupable; ACR is
+  // not, so its distribution is sampled from recent SSO logins.
+  const amrDist = sf(() => sq({ q: `SELECT AuthMethodReference, COUNT(Id) c FROM LoginHistory WHERE LoginTime=LAST_N_DAYS:${IDP_DAYS} GROUP BY AuthMethodReference ORDER BY COUNT(Id) DESC` }), []);
+  const acrSample = sf(() => sq({ q: `SELECT AuthContextClassRef FROM LoginHistory WHERE LoginTime=LAST_N_DAYS:${IDP_DAYS} AND (LoginType='SAML Idp Initiated SSO' OR LoginType='SAML Sfdc Initiated SSO') AND AuthContextClassRef!=null LIMIT 1000` }), []);
+  const ssoCount = sf(() => sq({ q: `SELECT COUNT(Id) c FROM LoginHistory WHERE LoginTime=LAST_N_DAYS:${IDP_DAYS} AND (LoginType='SAML Idp Initiated SSO' OR LoginType='SAML Sfdc Initiated SSO')` })[0]?.c ?? 0, 0);
+  if (Array.isArray(amrDist)) {
+    let amrPR = 0, amrStrong = 0, amrTotal = 0;
+    for (const r of amrDist) { const n = Number(r.c) || 0; amrTotal += n; const t = classifyAmr(r.AuthMethodReference); if (t === 'phishing-resistant') amrPR += n; else if (t === 'strong') amrStrong += n; }
+    const acrTally = {};
+    for (const r of (acrSample || [])) { const t = classifyAcr(r.AuthContextClassRef); acrTally[t] = (acrTally[t] || 0) + 1; }
+    const acrDominant = Object.entries(acrTally).sort((a, b) => b[1] - a[1])[0]?.[0] || 'none';
+    const dominantAcrValue = [...new Set((acrSample || []).map((r) => r.AuthContextClassRef))].slice(0, 3);
+    const tier = (amrPR > 0 || acrDominant === 'phishing-resistant') ? 'phishing-resistant'
+      : (amrStrong > 0 || acrDominant === 'strong') ? 'strong' : 'weak';
+    const verdict = tier === 'phishing-resistant' ? 'READY' : tier === 'strong' ? 'REVIEW' : 'GAP';
+    push({
+      id: '2c', title: 'SSO IdP MFA Signal (AMR/ACR)', enforce: 'Gates M1/M2/M3', status: 'ASSESSABLE',
+      metrics: { ssoLoginsWindow: ssoCount, amrStrongOrPRLogins: amrPR + amrStrong, amrTotalLogins: amrTotal, dominantAcrTier: acrDominant, dominantAcrValue, classifiedTier: tier },
+      verdict,
+      detail: tier === 'weak'
+        ? `IdP is sending a WEAK auth signal (AMR ${amrPR + amrStrong === 0 ? 'absent/none' : 'mostly weak'}; dominant ACR "${dominantAcrValue[0] || 'n/a'}"). Under Salesforce's 3-tier model this does NOT count as MFA → SSO will NOT satisfy M2 (every internal user gets challenged for native MFA) and cannot satisfy M1/M3. ACTION: configure the IdP (Okta: enable FIDO2/FastPass + add an AMR attribute statement / strong AuthnContextClassRef to the Salesforce app; Entra: AuthnContextClassRef is a known gap — request a Salesforce deferral + register native keys), test in sandbox, then re-run this check to confirm the signal flipped to strong.`
+        : tier === 'strong'
+        ? `IdP sends a STRONG (non-phishing-resistant) signal — satisfies M2, but NOT M1 (admins) or M3 (report step-up), which require a phishing-resistant method or Salesforce-native verification. Upgrade privileged users to FIDO2/passkey/hardware key.`
+        : `IdP sends a phishing-resistant signal on ${amrPR} logins — strongest tier. Confirm coverage spans the privileged population for M1.`,
+      checklistQ: ['Q2', 'Q6'],
+    });
+  }
 
   const waiveHolders = sf(() => sq({ q: `SELECT COUNT(Id) c FROM PermissionSetAssignment WHERE PermissionSet.PermissionsBypassMFAForUiLogins=true AND Assignee.IsActive=true` })[0]?.c ?? 0, null);
   push({
