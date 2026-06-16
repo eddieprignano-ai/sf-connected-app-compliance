@@ -1,7 +1,7 @@
 {
   "name": "sf-connected-app-compliance",
-  "version": "0.1.1",
-  "description": "Read-only audit of every Connected App and External Client App in a Salesforce org. Tells you which will fail to authenticate when Salesforce hardens PKCE, refresh-token rotation, and refresh-token validity — and whose publisher owns each fix.",
+  "version": "0.2.0",
+  "description": "Read-only audit of every Connected App and External Client App in a Salesforce org. Tells you which will fail to authenticate when Salesforce hardens PKCE, refresh-token rotation, and refresh-token validity — and whose publisher owns each fix. Includes a readiness scanner for the other 2026 security mandates (MFA, phishing-resistant MFA, report step-up, TSP, email-domain).",
   "type": "module",
   "main": "connected-app-compliance.mjs",
   "bin": {
@@ -10,6 +10,7 @@
   "scripts": {
     "scan": "node connected-app-compliance.mjs",
     "scan:will-break": "node connected-app-compliance.mjs --check-metadata --will-break",
+    "readiness": "node connected-app-compliance.mjs --readiness",
     "help": "node connected-app-compliance.mjs --help"
   },
   "keywords": [
@@ -39,6 +40,7 @@
   },
   "files": [
     "connected-app-compliance.mjs",
+    "mandate-readiness.mjs",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
