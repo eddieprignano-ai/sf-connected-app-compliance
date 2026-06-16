@@ -109,7 +109,10 @@ as `MANUAL` with the exact Setup location instead of inventing a check.
 ```bash
 node connected-app-compliance.mjs --readiness --org myorg
 node connected-app-compliance.mjs --readiness --org myorg --export-csv   # per-user remediation list
-node connected-app-compliance.mjs --readiness --org myorg --json
+node connected-app-compliance.mjs --readiness --org myorg --html         # executive scorecard
+node connected-app-compliance.mjs --readiness --org prod,uat             # multi-org verdict diff
+node connected-app-compliance.mjs --all --org myorg --check-metadata     # both scans in one run
+node connected-app-compliance.mjs --doctor --org myorg                   # preflight: what's queryable
 ```
 
 | Mandate | Enforce (prod) | How it's assessed | Verdict |
@@ -128,9 +131,44 @@ node connected-app-compliance.mjs --readiness --org myorg --json
 satisfy *MFA for All Users*, but **not** phishing-resistant MFA for admins or
 report step-up (those need a Salesforce-native method per user). The admin set
 may also include API/service accounts that authenticate via OAuth/JWT rather
-than interactive MFA — filter the `Profile` column in `--export-csv` to isolate
-the genuinely interactive human admins. `--export-csv` output contains usernames
-and is gitignored by default.
+than interactive MFA — so the tool **splits the M1 gap into interactive admins
+vs. API/service accounts** (the `Interactive` column in `--export-csv`); the
+interactive count is the true Jul-1 deadline. `--export-csv` output contains
+usernames and is gitignored by default.
+
+## Zero-install, CI, and config
+
+**Run without cloning** (once published to npm):
+
+```bash
+npx sf-connected-app-compliance --org myorg --check-metadata --will-break
+npx sf-connected-app-compliance --readiness --org myorg --html
+```
+
+**Doctor / graceful degradation.** `--doctor` reports which objects are
+queryable before a run. License-gated checks (Event Monitoring for export
+footprint, Shield for TSP) degrade to a `SKIPPED (reason)` verdict instead of
+erroring, so the tool runs in any edition. All `sf` CLI failures surface the
+*real* error (from the CLI's stdout JSON), not the masking update/transpile
+warning.
+
+**CI gate.** A ready-to-use GitHub Action lives at
+[`.github/workflows/compliance.yml`](.github/workflows/compliance.yml): a weekly
+scan that fails the build on `WILL_BREAK`/`GAP` (the tool's exit code is `2` when
+anything will break) and uploads HTML scorecards as artifacts. Store an
+`sfdxAuthUrl` as the `SF_AUTH_URL` secret.
+
+**Config / allowlist.** Drop a `.sfcompliance.json` (or pass `--config <file>`)
+to suppress known-accepted items and tune the IdP token lists — see
+[`.sfcompliance.example.json`](.sfcompliance.example.json):
+
+```json
+{
+  "allowlistApps": ["Salesforce CLI"],
+  "allowlistUsers": ["integration-svc@example.com"],
+  "amrPhishingResistant": ["hwk", "fido", "x509", "passkey", "webauthn"]
+}
+```
 
 ## Requirements
 

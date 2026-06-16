@@ -39,6 +39,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
+import { realError, printDoctor, renderHtml, ENFORCEMENT, countdownLabel, loadConfig } from './lib.mjs';
 
 const NC = '\x1b[0m', BOLD = '\x1b[1m', DIM = '\x1b[2m';
 const GREEN = '\x1b[32m', YELLOW = '\x1b[33m', RED = '\x1b[31m', CYAN = '\x1b[36m';
@@ -55,6 +56,28 @@ if (flag('--readiness')) {
   process.exit(await runReadiness());
 }
 
+// --doctor: preflight only — which objects are queryable in this org.
+if (flag('--doctor')) {
+  const orgs = (argv('--org', process.env.DEFAULT_SALESFORCE_ORG) || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!orgs.length) { console.error('error: pass --org <alias>'); process.exit(1); }
+  for (const o of orgs) printDoctor(o);
+  process.exit(0);
+}
+
+// Multi-org: --org a,b runs the connected-app scan per org as a subprocess (the
+// scan body is a top-level script). --readiness has native multi-org diff.
+if ((argv('--org', process.env.DEFAULT_SALESFORCE_ORG) || '').includes(',')) {
+  const orgs = argv('--org').split(',').map((s) => s.trim()).filter(Boolean);
+  const passthru = process.argv.slice(2).filter((a, i, arr) => a !== '--org' && arr[i - 1] !== '--org');
+  let worst = 0;
+  for (const o of orgs) {
+    console.log(`\n\x1b[1m═══ ${o} ═══\x1b[0m`);
+    try { execSync(`node "${path.join(path.dirname(new URL(import.meta.url).pathname), 'connected-app-compliance.mjs')}" --org ${o} ${passthru.join(' ')}`, { stdio: 'inherit' }); }
+    catch (e) { worst = e.status || 1; }
+  }
+  process.exit(worst);
+}
+
 if (flag('--help') || flag('-h')) {
   console.log(`Usage: connected-app-compliance.mjs [options]
 
@@ -64,7 +87,9 @@ if (flag('--help') || flag('-h')) {
                        --export-csv and --export-days. Run with --readiness -h
                        for its full options.
 
-  --org <alias>        Target Salesforce org (default: $DEFAULT_SALESFORCE_ORG)
+  --all                Run this Connected-App scan AND the --readiness scan.
+  --doctor             Preflight: report which objects are queryable in the org.
+  --org <a>[,<b>]      Target org(s). Comma-separated runs each (multi-org).
   --check-metadata     Retrieve ConnectedApp metadata XML to read PKCE, refresh-
                        token-rotation, refresh-token-policy, OAuth flows, and
                        IP relaxation. Without this, only SOQL-visible posture
@@ -74,8 +99,10 @@ if (flag('--help') || flag('-h')) {
                        condition rule failing.
   --days N             OauthToken usage window (default 90).
   --filter <verdict>   COMPLIANT | NEEDS_REVIEW | NON_COMPLIANT
+  --config <file>      .sfcompliance.json (allowlistApps suppression, etc.)
   --json               Machine-readable output.
   --csv                CSV output (suitable for shipping to a customer).
+  --html [file]        Executive HTML scorecard.
   --include-managed    Include managed-package ECAs (default: skip).
   -h, --help           Show this help`);
   process.exit(0);
@@ -102,7 +129,7 @@ function sfQuery(soql, useTooling = false) {
     const raw = execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }).toString();
     return JSON.parse(raw.slice(raw.indexOf('{'))).result?.records ?? [];
   } catch (e) {
-    console.error(`${RED}SOQL failed:${NC} ${soql.slice(0, 80)}...\n${e.stderr?.toString() || e.message}`);
+    console.error(`${RED}SOQL failed:${NC} ${soql.slice(0, 80)}...\n${realError(e)}`);
     return [];
   }
 }
@@ -207,17 +234,7 @@ function detectFlows(meta) {
   };
 }
 
-// Strip Salesforce CLI advisory lines (warnings about CLI updates, etc.) from
-// captured stderr so user-facing errors are readable. Without this, CLI update
-// notices leak into our error messages and obscure the real problem.
-function cleanCliStderr(s) {
-  return (s || '')
-    .toString()
-    .split('\n')
-    .filter((l) => l.trim() && !/›\s+Warning:/.test(l) && !/^\s*Warning:\s*@?salesforce\/cli/i.test(l))
-    .join('\n')
-    .trim();
-}
+// CLI advisory/error cleanup now lives in lib.mjs (realError / cleanStderr).
 
 // `sf project retrieve start` requires a workspace with an sfdx-project.json
 // at the cwd. To make this tool runnable from anywhere (not just inside an
@@ -259,8 +276,7 @@ function retrieveCAMetadata(devNames) {
     try {
       execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 128 * 1024 * 1024, cwd: projectDir });
     } catch (e) {
-      const msg = cleanCliStderr(e.stderr) || e.message;
-      errors.push(msg.slice(0, 400));
+      errors.push(realError(e).slice(0, 400));
     }
   }
 
@@ -304,7 +320,7 @@ function retrieveOrgWidePkceSetting() {
   try {
     execSync(`sf project retrieve start --metadata "Settings:OauthOidc" --target-org ${ORG} --output-dir "${tmpRel}" --json`, { stdio: ['ignore', 'pipe', 'pipe'], cwd: projectDir });
   } catch (e) {
-    return { error: cleanCliStderr(e.stderr) || e.message.slice(0, 200) };
+    return { error: realError(e).slice(0, 200) };
   }
   const settingsPath = walkFor(tmp, 'OauthOidc.settings-meta.xml');
   if (!settingsPath) return { error: 'Settings:OauthOidc not retrieved (older org? insufficient permission?)' };
@@ -723,15 +739,21 @@ for (const r of reports) {
   r.willBreak = willBreakVerdict(r);
 }
 
+// Config allowlist: suppress known-accepted apps (by exact name) so re-runs
+// stay signal-rich. .sfcompliance.json → { "allowlistApps": ["My App", ...] }.
+const CONFIG = loadConfig(argv('--config', null));
+const allowApps = new Set((CONFIG.allowlistApps || []).map((s) => s.toLowerCase()));
+let base = allowApps.size ? reports.filter((r) => !allowApps.has((r.name || '').toLowerCase())) : reports;
+
 let filtered;
 if (WILL_BREAK_MODE) {
-  filtered = reports
+  filtered = base
     .filter((r) => r.willBreak === 'WILL_BREAK' || (r.kind === 'UNTRACKED' && (r.usage?.tokenCount ?? 0) > 0))
     .sort((a, b) => (b.usage?.useCount ?? 0) - (a.usage?.useCount ?? 0));
 } else if (FILTER) {
-  filtered = reports.filter((r) => r.verdict === FILTER);
+  filtered = base.filter((r) => r.verdict === FILTER);
 } else {
-  filtered = reports;
+  filtered = base;
 }
 
 // ── Output ───────────────────────────────────────────────────────────────
@@ -845,4 +867,26 @@ if (!CHECK_METADATA) {
 }
 if (!WILL_BREAK_MODE && summary.WILL_BREAK + summary.UNTRACKED_ACTIVE > 0) {
   console.error(`${YELLOW}tip:${NC} ${summary.WILL_BREAK} apps will break + ${summary.UNTRACKED_ACTIVE} untracked active. Re-run with ${BOLD}--will-break${NC} for the focused list.`);
+}
+
+// --html: executive scorecard for the Connected-App scan.
+if (flag('--html')) {
+  const statusFor = (r) => r.willBreak === 'WILL_BREAK' ? 'WILL_BREAK' : r.verdict;
+  const rows = filtered.map((r) => ({
+    status: statusFor(r),
+    label: `${r.name} [${r.kind}]`,
+    enforce: `${ENFORCEMENT.connectedApp} (${countdownLabel(ENFORCEMENT.connectedApp)})`,
+    meta: `${r.publisher?.publisher?.name || (r.kind === 'UNTRACKED' ? 'unknown publisher' : '')}${r.contact ? ' · ' + r.contact : ''}`,
+    detail: r.findings.filter((f) => f.pass === false).map((f) => (RULES[f.rule]?.label ?? f.rule) + ': ' + f.detail).join(' | ') || (r.kind === 'UNTRACKED' ? 'Untracked active OAuth traffic' : 'All applicable checks passed'),
+  }));
+  const file = argv('--html', null) || `connected-app-compliance-${ORG}-${new Date().toISOString().slice(0, 10)}.html`;
+  fs.writeFileSync(file, renderHtml({ title: 'Connected App / ECA Compliance', org: ORG, generatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '), groups: [{ heading: `Apps (${filtered.length})`, rows }] }));
+  console.error(`${CYAN}HTML scorecard →${NC} ${file}`);
+}
+
+// --all: chain the readiness scan for the other 7 mandates after this one.
+if (flag('--all')) {
+  console.error(`\n${BOLD}═══ Other 7 mandates (readiness) ═══${NC}`);
+  const { runReadiness } = await import('./mandate-readiness.mjs');
+  await runReadiness();
 }
