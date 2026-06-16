@@ -47,8 +47,22 @@ const args = process.argv.slice(2);
 const flag = (n) => args.includes(n);
 const argv = (n, fb = null) => { const i = args.indexOf(n); return i >= 0 && i + 1 < args.length ? args[i + 1] : fb; };
 
+// --readiness delegates to the companion mandate-readiness module (the other
+// 7 June–July 2026 security mandates beyond Connected Apps). Kept as a separate
+// module for maintainability; this flag exposes it as one unified CLI.
+if (flag('--readiness')) {
+  const { runReadiness } = await import('./mandate-readiness.mjs');
+  process.exit(await runReadiness());
+}
+
 if (flag('--help') || flag('-h')) {
   console.log(`Usage: connected-app-compliance.mjs [options]
+
+  --readiness          Assess the OTHER 7 Salesforce 2026 security mandates
+                       (MFA, phishing-resistant MFA, report step-up, TSP, email
+                       domain). Delegates to mandate-readiness.mjs; accepts
+                       --export-csv and --export-days. Run with --readiness -h
+                       for its full options.
 
   --org <alias>        Target Salesforce org (default: $DEFAULT_SALESFORCE_ORG)
   --check-metadata     Retrieve ConnectedApp metadata XML to read PKCE, refresh-
@@ -226,7 +240,14 @@ function ensureScratchSfdxProject() {
 function retrieveCAMetadata(devNames) {
   if (!devNames.length) return { map: new Map(), errors: [] };
   const projectDir = ensureScratchSfdxProject();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ca-meta-'));
+  // `sf` CLI 2.x rejects --output-dir unless it resolves *inside* the project
+  // root (OutputDirOutsideProjectError). On macOS an absolute /tmp path is a
+  // symlink to /private/tmp, so the CLI's relative-path check mis-fires even
+  // when the dir is genuinely inside projectDir. Pass a RELATIVE output dir
+  // (resolved against cwd=projectDir) and keep the absolute path for walking.
+  const tmpRel = 'ca-meta';
+  const tmp = path.join(projectDir, tmpRel);
+  fs.mkdirSync(tmp, { recursive: true });
   console.error(`${DIM}retrieving ConnectedApp metadata for ${devNames.length} apps...${NC}`);
 
   const chunks = [];
@@ -234,7 +255,7 @@ function retrieveCAMetadata(devNames) {
 
   const errors = [];
   for (const chunk of chunks) {
-    const cmd = `sf project retrieve start ${chunk.map((n) => `--metadata "ConnectedApp:${n}"`).join(' ')} --target-org ${ORG} --output-dir "${tmp}" --json`;
+    const cmd = `sf project retrieve start ${chunk.map((n) => `--metadata "ConnectedApp:${n}"`).join(' ')} --target-org ${ORG} --output-dir "${tmpRel}" --json`;
     try {
       execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 128 * 1024 * 1024, cwd: projectDir });
     } catch (e) {
@@ -275,9 +296,13 @@ function retrieveOrgWidePkceSetting() {
   //   <oAuthCdCrdtFlowEnable>   — allow code-credential flow
   // We pull all four because they all change "what will break" downstream.
   const projectDir = ensureScratchSfdxProject();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oidc-settings-'));
+  // Output dir must resolve inside the project root, passed relative — see the
+  // symlink note in retrieveCAMetadata.
+  const tmpRel = 'oidc-settings';
+  const tmp = path.join(projectDir, tmpRel);
+  fs.mkdirSync(tmp, { recursive: true });
   try {
-    execSync(`sf project retrieve start --metadata "Settings:OauthOidc" --target-org ${ORG} --output-dir "${tmp}" --json`, { stdio: ['ignore', 'pipe', 'pipe'], cwd: projectDir });
+    execSync(`sf project retrieve start --metadata "Settings:OauthOidc" --target-org ${ORG} --output-dir "${tmpRel}" --json`, { stdio: ['ignore', 'pipe', 'pipe'], cwd: projectDir });
   } catch (e) {
     return { error: cleanCliStderr(e.stderr) || e.message.slice(0, 200) };
   }

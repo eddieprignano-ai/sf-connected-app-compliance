@@ -98,6 +98,40 @@ and `client_creds_user_set_when_enabled` are **break-condition rules** — failu
 on any of these means the app's OAuth will fail under enforcement. Other rules
 are best-practice posture.
 
+## Beyond Connected Apps: `--readiness`
+
+The Connected App / ECA mandate is one of eight Salesforce security controls
+enforced between April and July 2026. The `--readiness` mode (companion module
+`mandate-readiness.mjs`) assesses the **other seven** — for the ones that are
+measurable from SOQL/metadata — and honestly marks the runtime/client-side ones
+as `MANUAL` with the exact Setup location instead of inventing a check.
+
+```bash
+node connected-app-compliance.mjs --readiness --org myorg
+node connected-app-compliance.mjs --readiness --org myorg --export-csv   # per-user remediation list
+node connected-app-compliance.mjs --readiness --org myorg --json
+```
+
+| Mandate | Enforce (prod) | How it's assessed | Verdict |
+|---|---|---|---|
+| Phishing-Resistant MFA for Admins | Jul 1 2026 | Privileged users (MAD/VAD/CustomizeApp/AuthorApex) vs. registered U2F/passkey/built-in methods | `READY` / `GAP` |
+| MFA for All Internal Users | Jul 20 2026 | Active internal users with no registered verification method (`TwoFactorMethodsInfo`) | `READY` / `GAP` |
+| **SSO IdP MFA signal (AMR/ACR)** | gates M1/M2/M3 | Live `LoginHistory.AuthMethodReference` / `AuthContextClassRef` classified into Salesforce's 3-tier model | `READY` / `REVIEW` / `GAP` |
+| Bypass-MFA exemption holders | — | Assignments of `PermissionsBypassMFAForUiLogins` | `READY` / `REVIEW` |
+| Step-Up Auth on Report Actions | Jul 1 2026 | Report-permission users lacking a native verification method | `READY` / `GAP` |
+| Step-Up on Anomalous Exports | Jul 13 2026 | `ReportExport` EventLogFile footprint (ML control is unscoreable) | `INFORM` |
+| Transaction Security Policy (Reports) | Jul 13 2026 | Whether a qualifying `ReportEvent` TSP exists | `READY` / `DEFAULT_WILL_APPLY` |
+| Email Domain Verification | live | `OrgWideEmailAddress.IsVerified` + active DKIM (`EmailDomainKey`) | `READY` / `GAP` |
+| Anonymizing-IP block · login-anomaly containment · Mobile SDK | live / Jul | Runtime/client-side — not queryable | `MANUAL` |
+
+**Interpretation caveats baked in:** in SSO orgs an IdP AMR/ACR signal can
+satisfy *MFA for All Users*, but **not** phishing-resistant MFA for admins or
+report step-up (those need a Salesforce-native method per user). The admin set
+may also include API/service accounts that authenticate via OAuth/JWT rather
+than interactive MFA — filter the `Profile` column in `--export-csv` to isolate
+the genuinely interactive human admins. `--export-csv` output contains usernames
+and is gitignored by default.
+
 ## Requirements
 
 - **Node.js 18+**
