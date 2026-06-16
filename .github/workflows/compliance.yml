@@ -1,0 +1,57 @@
+# Weekly Salesforce security-mandate compliance gate.
+#
+# Fails the run if any Connected App WILL_BREAK or any readiness mandate is in
+# GAP, so a regression (a new app without PKCE, an admin losing their key) is
+# caught before an enforcement date does it for you.
+#
+# Setup:
+#   1. Create a Salesforce auth secret. Easiest: `sf org login web`, then
+#      `sf org display --target-org <alias> --verbose --json` and store the
+#      sfdxAuthUrl as the repo secret SF_AUTH_URL.
+#   2. Adjust the schedule/branch as needed.
+
+name: SF Security Compliance
+
+on:
+  schedule:
+    - cron: '0 13 * * 1' # Mondays 13:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  compliance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Authenticate to Salesforce
+        env:
+          SF_AUTH_URL: ${{ secrets.SF_AUTH_URL }}
+        run: |
+          echo "$SF_AUTH_URL" > /tmp/authurl.txt
+          sf org login sfdx-url --sfdx-url-file /tmp/authurl.txt --alias target
+          rm -f /tmp/authurl.txt
+
+      - name: Connected App / ECA scan (fails on WILL_BREAK)
+        run: node connected-app-compliance.mjs --org target --check-metadata --will-break
+
+      - name: Mandate readiness scan (fails on GAP)
+        run: node connected-app-compliance.mjs --readiness --org target
+
+      - name: Publish HTML scorecards
+        if: always()
+        run: |
+          node connected-app-compliance.mjs --org target --check-metadata --html report-connected-apps.html || true
+          node connected-app-compliance.mjs --readiness --org target --html report-readiness.html || true
+
+      - name: Upload scorecards
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-scorecards
+          path: report-*.html

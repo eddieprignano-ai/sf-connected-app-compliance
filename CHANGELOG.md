@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-06-16
+
+### Added
+
+- **`--doctor` preflight.** Probes whether each gated object is queryable in the
+  target org (ConnectedApplication, TwoFactorMethodsInfo, LoginHistory AMR/ACR,
+  EventLogFile, TransactionSecurityPolicy, OrgWideEmailAddress) and reports what
+  will be SKIPPED and why — before a real run.
+- **Graceful degradation.** License/permission-gated checks (Event Monitoring,
+  Shield, etc.) now emit a `SKIPPED (reason)` verdict instead of erroring, so the
+  tool runs cleanly in any edition.
+- **Interactive-vs-API admin split (M1).** Cross-references privileged users
+  against `LoginHistory` interactive login types so the headline phishing-
+  resistant-MFA gap reflects genuine interactive admins, not OAuth/JWT service
+  accounts (the latter are reported separately and flagged in the CSV).
+- **`--html` / `--md` executive scorecards** for both the Connected-App scan and
+  `--readiness`, with a per-mandate **enforcement-date countdown** ("15d left").
+- **Multi-org support.** `--org a,b` runs each org; `--readiness` renders a
+  side-by-side verdict **diff** (surfaces sandbox-vs-prod drift, e.g. a TSP that
+  exists in staging but not prod).
+- **`--all`** runs the Connected-App scan and the readiness scan together.
+- **`--raw`** dumps the live AMR/ACR distribution behind the M2c signal check.
+- **Config / allowlist file** (`.sfcompliance.json`, or `--config <file>`):
+  `allowlistApps` and `allowlistUsers` suppress known-accepted items;
+  `amrPhishingResistant` / `amrStrong` override the AMR token lists for
+  non-standard IdPs. Example shipped as `.sfcompliance.example.json`.
+- **GitHub Action recipe** (`.github/workflows/compliance.yml`) — weekly scan
+  that fails the build on `WILL_BREAK`/`GAP` and uploads HTML scorecards.
+- Shared **`lib.mjs`** module: robust `sf`-error surfacing (reads the real error
+  from stdout JSON instead of the masking CLI warning), enforcement-date
+  countdown, config loader, HTML/Markdown renderer, and the doctor probes.
+
+### Fixed
+
+- **`sf` CLI errors are now legible everywhere.** All `execSync` failures route
+  through `realError()`, which extracts the actual `{name, message}` from the
+  CLI's stdout JSON rather than surfacing the harmless stderr transpile/update
+  warning (the exact failure mode that masked the 0.2.0 retrieve bug).
+
 ## [0.2.0] - 2026-06-16
 
 ### Fixed

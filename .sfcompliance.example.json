@@ -1,0 +1,16 @@
+{
+  "_comment": "Copy to .sfcompliance.json and edit. Read automatically from the current directory, or pass --config <path>. Lets you suppress known-accepted items so re-runs stay signal-rich, and override the AMR/ACR token lists if your IdP uses non-standard values.",
+
+  "allowlistApps": [
+    "Salesforce CLI",
+    "My Reviewed Internal App"
+  ],
+
+  "allowlistUsers": [
+    "integration-svc@example.com",
+    "bidatareplication@example.com"
+  ],
+
+  "amrPhishingResistant": ["hwk", "fido", "x509", "passkey", "webauthn", "u2f", "phr", "phrh", "swk"],
+  "amrStrong": ["mfa", "otp", "sms", "tel", "rsa", "kba", "mca", "totp", "sfa", "push"]
+}
