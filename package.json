@@ -11,7 +11,8 @@
     "scan": "node connected-app-compliance.mjs",
     "scan:will-break": "node connected-app-compliance.mjs --check-metadata --will-break",
     "readiness": "node connected-app-compliance.mjs --readiness",
-    "help": "node connected-app-compliance.mjs --help"
+    "help": "node connected-app-compliance.mjs --help",
+    "test": "node --test"
   },
   "keywords": [
     "salesforce",

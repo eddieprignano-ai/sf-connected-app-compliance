@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **ECA IP-relaxation false positive.** `IpRelaxationPolicyType` on External Client
+  Apps returns STRING enums (`"Enforce"`, `"Relax"`, …), but the rule compared against
+  numeric picklist codes (`0`/`3`), so every ECA with `"Enforce"` was mis-classified as
+  *relaxed* (its own detail even printed `=Enforce (relaxed)`). Extracted the logic into
+  `classifyIpRelaxation()` in `lib.mjs` — handles string enums and legacy numeric forms,
+  returns `null` for unrecognized values instead of guessing. Added `test/ip-relaxation.test.mjs`
+  (run with `npm test`). Found 2026-06-22 against VivintProd (5/5 ECAs false-flagged).
+
 ## [0.3.0] - 2026-06-16
 
 ### Added

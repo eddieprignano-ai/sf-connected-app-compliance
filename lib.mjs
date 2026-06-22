@@ -37,6 +37,29 @@ export function countdownLabel(dateStr, now = new Date()) {
 }
 
 /**
+ * Classify an ECA OAuth-policy IP-relaxation value as enforced / relaxed / unknown.
+ *
+ * `ExtlClntAppOauthPlcyCnfg.IpRelaxationPolicyType` returns STRING enums
+ * ("Enforce", "Relax", "EnforceForRefreshToken", ...). Older/numeric picklist
+ * forms (0=Enforce, 1=Relax-for-activated-devices, 2=Relax, 3=Enforce-but-relax-
+ * for-refresh-tokens) are also handled for back-compat. Any "Enforce*" or the
+ * numeric enforced codes (0, 3) are enforced; "Relax*" / numeric (1, 2) are relaxed.
+ *
+ * @returns {boolean|null} true = enforced, false = relaxed, null = unset/unknown
+ *   (never guess — an unrecognized value returns null so the rule reports "unknown"
+ *   rather than silently mis-classifying it).
+ */
+export function classifyIpRelaxation(ipRaw) {
+  if (ipRaw == null || ipRaw === '') return null;
+  const s = String(ipRaw).trim();
+  if (/^enforce/i.test(s)) return true;     // "Enforce", "EnforceForRefreshToken"
+  if (/^relax/i.test(s)) return false;      // "Relax", "RelaxForRefreshToken"
+  if (s === '0' || s === '3') return true;  // legacy numeric enforced codes
+  if (s === '1' || s === '2') return false; // legacy numeric relaxed codes
+  return null;                              // unrecognized — don't guess
+}
+
+/**
  * A Complierror carries a clean, human-readable message extracted from the
  * Salesforce CLI's stdout JSON (where the real error lives), with stderr noise
  * (update notices, transpile warnings) stripped.

@@ -39,7 +39,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
-import { realError, printDoctor, renderHtml, ENFORCEMENT, countdownLabel, loadConfig } from './lib.mjs';
+import { realError, printDoctor, renderHtml, ENFORCEMENT, countdownLabel, loadConfig, classifyIpRelaxation } from './lib.mjs';
 
 const NC = '\x1b[0m', BOLD = '\x1b[1m', DIM = '\x1b[2m';
 const GREEN = '\x1b[32m', YELLOW = '\x1b[33m', RED = '\x1b[31m', CYAN = '\x1b[36m';
@@ -461,15 +461,15 @@ function evaluateECA(_eca, policy) {
     detail: `PermittedUsersPolicyType=${permitted ?? 'unset'}`,
   });
 
-  // IP relaxation — picklist values are: 0=Enforce, 1=Relax-for-activated-devices,
-  // 2=Relax (full), 3=Enforce-but-relax-for-refresh-tokens. 0 and 3 are enforced;
-  // 1 and 2 are relaxed.
+  // IP relaxation — ExtlClntAppOauthPlcyCnfg.IpRelaxationPolicyType returns STRING
+  // enums ("Enforce", "Relax", ...); legacy/numeric forms (0/3=enforced, 1/2=relaxed)
+  // are also handled. See classifyIpRelaxation() in lib.mjs.
   const ip = policy?.IpRelaxationPolicyType;
-  const ipEnforced = ip === '0' || ip === '3' || ip === 0 || ip === 3;
+  const ipEnforced = classifyIpRelaxation(ip);
   findings.push({
     rule: 'ip_relaxation_enforced',
-    pass: ip == null ? null : ipEnforced,
-    detail: `IpRelaxationPolicyType=${ip ?? 'unset'} ${ipEnforced ? '(enforced)' : ip != null ? '(relaxed)' : ''}`.trim(),
+    pass: ipEnforced,
+    detail: `IpRelaxationPolicyType=${ip ?? 'unset'}${ipEnforced == null ? '' : ipEnforced ? ' (enforced)' : ' (relaxed)'}`,
   });
 
   // Refresh-token policy — picklist: Infinite, Zero, SpecificLifetime, SpecificInactivity.
